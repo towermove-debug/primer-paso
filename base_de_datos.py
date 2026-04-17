@@ -36,6 +36,16 @@ class BaseDatos:
             self.cursor = self.conexion.cursor()
             if self._sql_crear_tabla:
                 self.cursor.execute(self._sql_crear_tabla)
+                
+                # --- MIGRACIÓN: Agregar columnas faltantes si la tabla ya existía ---
+                if self._nombre_tabla == "ventas":
+                    self.cursor.execute("PRAGMA table_info(ventas)")
+                    columnas_actuales = [col[1] for col in self.cursor.fetchall()]
+                    if "costo" not in columnas_actuales:
+                        self.cursor.execute("ALTER TABLE ventas ADD COLUMN costo REAL DEFAULT 0")
+                    if "proveedor" not in columnas_actuales:
+                        self.cursor.execute("ALTER TABLE ventas ADD COLUMN proveedor TEXT")
+                
                 self.conexion.commit()
         except Exception as ex:
             print(f"Error al conectar con la base de datos: {ex}")
@@ -123,12 +133,14 @@ class Ventas(BaseDatos):
             cantidad INTEGER,
             producto TEXT,
             utilidad REAL DEFAULT 0,
+            costo    REAL DEFAULT 0,
+            proveedor TEXT,
             fecha    DATE DEFAULT (date('now', 'localtime')),
             hora     TIME DEFAULT (time('now', 'localtime'))
         )
     """
 
-    def agregar(self, cantidad, producto, utilidad=0.0):
+    def agregar(self, cantidad, producto, utilidad=0.0, **kwargs):
         """
         Registra una venta.
         - Si el producto ya existe, acumula cantidad y utilidad.
@@ -147,8 +159,8 @@ class Ventas(BaseDatos):
             )
         else:
             self.cursor.execute(
-                "INSERT INTO ventas (cantidad, producto, utilidad) VALUES (?, ?, ?)",
-                (cantidad, producto, utilidad),
+                "INSERT INTO ventas (cantidad, producto, utilidad, costo, proveedor) VALUES (?, ?, ?, ?, ?)",
+                (cantidad, producto, utilidad, kwargs.get('costo', 0.0), kwargs.get('proveedor', '')),
             )
         self.conexion.commit()
 
