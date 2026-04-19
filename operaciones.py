@@ -17,7 +17,8 @@ class procesos:
 
 
 
-    
+    #paraq los gastos filtrar y separar productos y proveedores 
+    #yy ara reposicion hacer sistema de agregado de productos nuevos 
 
     def agregar_tabla_stock(self, cantidad, producto, utilidad, costo, proveedor):
         proveedor_selecionado=self.db["proveedores"].obtener_nombre(proveedor)
@@ -55,28 +56,3 @@ class procesos:
       
 
 
-
-
-    def agregar_tabla_historial(self, cantidad, producto, costo, utilidad, proveedor):
-        self.db["historial"].agregar_venta_general(cantidad, producto, costo, utilidad, proveedor)
-
-    def agregar_tabla_proveedores(self, nombre, telefono, correo):
-        self.db["proveedores"].agregar_proveedor(nombre, telefono, correo)
-
-    def eliminar_tabla_proveedores(self, nombre):
-        self.db["proveedores"].eliminar_proveedor(nombre)
-
-    def actualizar_tabla_proveedores(self, nombre, telefono, correo):
-        self.db["proveedores"].actualizar_proveedor(nombre, telefono, correo)
-
-    def actualizar_tabla_stock(self, producto, cantidad):
-        self.db["stock"].actualizar(producto, cantidad) 
-
-    def obtener_columnas(self, tabla):
-        return self.db[tabla].obtener_columnas()
-
-    def obtener_todos(self, tabla):
-        return self.db[tabla].obtener_todos()
-
-
-   
