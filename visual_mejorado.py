@@ -87,6 +87,25 @@ class VisualApp:
         else: # Llamada programática con título
             self.form_title.value = title.upper()
             self.form_container.visible = True
+            if title =="Agregar Stock":
+                self.form_title.color = ft.Colors.GREEN_400
+            elif title =="Agregar Venta":
+                self.form_title.color = ft.Colors.GREEN_600
+            elif title =="Agregar Proveedor":
+                self.form_title.color = ft.Colors.GREEN_600
+            elif title =="Borrar Registro":
+                self.form_title.color = ft.Colors.RED_600
+            elif title =="Eliminar Venta":
+                self.form_title.color = ft.Colors.RED_600
+            elif title =="Eliminar Proveedor":
+                self.form_title.color = ft.Colors.RED_600
+            elif title =="Modificar Stock":
+                self.form_title.color = ft.Colors.YELLOW_600
+            elif title =="Modificar Venta":
+                self.form_title.color = ft.Colors.YELLOW_600
+            elif title =="Modificar Proveedor":
+                self.form_title.color = ft.Colors.YELLOW_600
+            
         self.page.update()
 
     def on_producto_change(self, e):
