@@ -42,6 +42,11 @@ class Stock(BaseDB):
             )
         ''')#bien 
         self.conexion.commit()
+    def obtener_cantidad_menores_20(self):
+        if not self.cursor:
+            self.conectar()
+        self.cursor.execute(f"SELECT cantidad,producto,proveedor FROM {self.tabla} WHERE cantidad < 20")
+        return self.cursor.fetchall()
 
     def actualizar(self, producto, cantidad):
         if not self.cursor:
@@ -54,21 +59,44 @@ class Stock(BaseDB):
         self.cursor.execute(f"INSERT INTO {self.tabla} (cantidad, producto, utilidad, costo, proveedor) VALUES (?, ?, ?, ?, ?)", (cantidad, producto, utilidad, costo, proveedor))
         self.conexion.commit()
 
-    def eliminar_stock(self, producto):
+    def eliminar_stock(self, id_registro,producto):
         if not self.cursor:
             self.conectar()
-        self.cursor.execute(f"DELETE FROM {self.tabla} WHERE producto = ?", (producto,))
-        self.conexion.commit()
+        try:
+            self.cursor.execute(f"DELETE FROM {self.tabla} WHERE id = ? AND producto = ?", (id_registro,producto))
+            self.conexion.commit()
+        except sqlite3.Error as e:
+            print(f"Error al eliminar el stock: {e}")
 
     def modificar_stock(self, id_registro, cantidad, producto, utilidad, costo, proveedor):
         if not self.cursor:
             self.conectar()
-        self.cursor.execute(f'''
+        try:
+            self.cursor.execute(f'''
             UPDATE {self.tabla} 
             SET cantidad = ?, producto = ?, utilidad = ?, costo = ?, proveedor = ? 
             WHERE id = ?
         ''', (cantidad, producto, utilidad, costo, proveedor, id_registro))
-        self.conexion.commit()
+            self.conexion.commit()
+        except sqlite3.Error as e:
+            print(f"Error al modificar el stock: {e}")
+    def obtener_cantidad(self,id_registro, producto):
+        if not self.cursor:
+            self.conectar()
+        try:
+            self.cursor.execute(f"SELECT cantidad FROM {self.tabla} WHERE id = ? AND producto = ?", (id_registro, producto))
+            return self.cursor.fetchone()[0], self.cursor.fetchone()[1]
+        except sqlite3.Error as e:
+            print(f"Error al obtener la cantidad: {e}")
+    def obtener_todo_historial(self,id_registro,costo,proveedor):
+        if not self.cursor:
+            self.conectar()
+        try:
+            self.cursor.execute(f"SELECT id_registro,costo,proveedor FROM {self.tabla} WHERE id = ? AND costo = ? AND proveedor = ?", (id_registro, costo, proveedor))
+            return self.cursor.fetchone()[0], self.cursor.fetchone()[1], self.cursor.fetchone()[2]
+        except sqlite3.Error as e:
+            print(f"Error al obtener la cantidad: {e}")
+
 
 class VentasDiarias(BaseDB):
     def __init__(self):
@@ -87,33 +115,65 @@ class VentasDiarias(BaseDB):
             )
         ''')
         self.conexion.commit()
-    def agregar_venta(self, cantidad, producto, utilidad):
+    def agregar_venta_diaria(self,id_registro, cantidad, producto, utilidad):
         if not self.cursor:
             self.conectar()
-        self.cursor.execute(f"INSERT INTO {self.tabla} (cantidad, producto, utilidad) VALUES (?, ?, ?)", (cantidad, producto, utilidad))
+        self.cursor.execute(f"INSERT INTO {self.tabla} (id_registro, cantidad, producto, utilidad) VALUES (?, ?, ?, ?)", (id_registro, cantidad, producto, utilidad))
         self.conexion.commit()
 
-class Ventas(BaseDB):
+    def obtener_columnas_utilidad_total(self):
+        if not self.cursor:
+            self.conectar()
+        self.cursor.execute(f"SELECT utilidad FROM {self.tabla}")
+        return self.cursor.fetchall()
+    def obtener_columnas_cantidad(self):
+        if not self.cursor:
+            self.conectar()
+        self.cursor.execute(f"SELECT cantidad FROM {self.tabla}")
+        return self.cursor.fetchall()
+    def obtener_columnas_producto(self):
+        if not self.cursor:
+            self.conectar()
+        self.cursor.execute(f"SELECT producto FROM {self.tabla}")
+        return self.cursor.fetchall()
+    def obtener_columnas_id(self):
+        if not self.cursor:
+            self.conectar()
+        self.cursor.execute(f"SELECT id FROM {self.tabla}")
+        return self.cursor.fetchall()
+    def obtener_columnas_hora(self,producto):
+        if not self.cursor:
+            self.conectar()
+        self.cursor.execute(f"SELECT hora FROM {self.tabla} WHERE producto = ?", (producto,))
+
+        return self.cursor.fetchall()
+    def obtener_todo(self):
+        if not self.cursor:
+            self.conectar()
+        self.cursor.execute(f"SELECT * FROM {self.tabla}")
+        return self.cursor.fetchall()
+
+class Ventas_general(BaseDB):
     def __init__(self):
         super().__init__()
         self.tabla = "ventas_diarias"
 
-    def crear_tablas(self):
+    def crear_tablas_general(self):
         self.cursor.execute(f'''
             CREATE TABLE IF NOT EXISTS {self.tabla} (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 cantidad INTEGER,
-                producto TEXT,
+                producto TEXT UNIQUE,
                 costo REAL,
                 utilidad REAL,
                 proveedor TEXT,
-                fecha DATE DEFAULT (date('now', 'localtime')),
-                 hora TIME DEFAULT (time('now', 'localtime'))
+                hora TEXT,
+                fecha DATE DEFAULT (date('now', 'localtime'))
             )
         ''')
         self.conexion.commit()
 
-    def agregar_venta(self, cantidad, producto, costo, utilidad, proveedor):
+    def agregar_venta_general(self, cantidad, producto, costo, utilidad, proveedor):
         if not self.cursor:
             self.conectar()
         self.cursor.execute(f"INSERT INTO {self.tabla} (cantidad, producto, costo, utilidad, proveedor) VALUES (?, ?, ?, ?, ?)", (cantidad, producto, costo, utilidad, proveedor))
@@ -129,7 +189,7 @@ class proveedores(BaseDB):
         self.cursor.execute(f'''
             CREATE TABLE IF NOT EXISTS {self.tabla} (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                nombre TEXT,
+                nombre TEXT UNIQUE,
                 telefono TEXT,
                 correo TEXT
             )
