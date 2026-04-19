@@ -1,211 +1,154 @@
-"""
-base_de_datos.py
-────────────────
-Módulo de acceso a datos para la aplicación de stock/ventas.
-
-Estructura:
-  - BaseDatos : clase base con lógica compartida (conectar, desconectar, obtener).
-  - Stock     : ABM de productos en inventario.
-  - Ventas    : registro de ventas (acumula si el producto ya existe).
-  - VentasDiarias : copia diaria de ventas para historial.
-
-Todas las tablas viven en el archivo 'stock.db' (SQLite).
-"""
-
 import sqlite3
-from datetime import datetime
 
-
-# ──────────────────────────────────────────────
-#  Clase base: lógica compartida de conexión
-# ──────────────────────────────────────────────
-class BaseDatos:
-    """
-    Clase base que encapsula la conexión a SQLite.
-    Cada subclase solo necesita definir su SQL de creación de tabla
-    y sus métodos de negocio.
-    """
-
-    # Cada subclase sobreescribe esto con su CREATE TABLE
-    _sql_crear_tabla = ""
+class BaseDB:
+    def __init__(self, db_name="stock.db"):
+        self.db_name = db_name
+        self.conexion = None
+        self.cursor = None
 
     def conectar(self):
-        """Abre la conexión a 'stock.db' y crea la tabla si no existe."""
-        try:
-            self.conexion = sqlite3.connect("stock.db")
-            self.cursor = self.conexion.cursor()
-            if self._sql_crear_tabla:
-                self.cursor.execute(self._sql_crear_tabla)
-                
-                # --- MIGRACIÓN: Agregar columnas faltantes si la tabla ya existía ---
-                if self._nombre_tabla == "ventas":
-                    self.cursor.execute("PRAGMA table_info(ventas)")
-                    columnas_actuales = [col[1] for col in self.cursor.fetchall()]
-                    if "costo" not in columnas_actuales:
-                        self.cursor.execute("ALTER TABLE ventas ADD COLUMN costo REAL DEFAULT 0")
-                    if "proveedor" not in columnas_actuales:
-                        self.cursor.execute("ALTER TABLE ventas ADD COLUMN proveedor TEXT")
-                
-                self.conexion.commit()
-        except Exception as ex:
-            print(f"Error al conectar con la base de datos: {ex}")
-
-    def desconectar(self):
-        """Cierra la conexión de forma segura."""
-        if hasattr(self, "conexion") and self.conexion:
-            self.conexion.close()
-
-    def obtener_todos(self):
-        """Devuelve todas las filas de la tabla asociada."""
-        self.cursor.execute(f"SELECT * FROM {self._nombre_tabla}")
-        return self.cursor.fetchall()
+        self.conexion = sqlite3.connect(self.db_name)
+        self.cursor = self.conexion.cursor()
+        
 
     def obtener_columnas(self):
-        """Devuelve la lista de nombres de columnas de la tabla."""
-        self.cursor.execute(f"SELECT * FROM {self._nombre_tabla} LIMIT 0")
-        return [desc[0] for desc in self.cursor.description]
+        if not self.cursor:
+            self.conectar()
+        self.cursor.execute(f"PRAGMA table_info({self.tabla})")
+        return [col[1] for col in self.cursor.fetchall()]
 
-
-# ──────────────────────────────────────────────
-#  Stock – inventario de productos
-# ──────────────────────────────────────────────
-class Stock(BaseDatos):
-    """
-    Maneja la tabla 'stock' con los campos:
-      id, cantidad, producto, utilidad, costo, proveedor.
-    """
-
-    _nombre_tabla = "stock"
-    _sql_crear_tabla = """
-        CREATE TABLE IF NOT EXISTS stock (
-            id        INTEGER PRIMARY KEY AUTOINCREMENT,
-            cantidad  INTEGER,
-            producto  TEXT,
-            utilidad  REAL,
-            costo     REAL,
-            proveedor TEXT
-        )
-    """
-
-    def agregar(self, cantidad, producto, utilidad, costo, proveedor):
-        """Inserta un nuevo producto en el inventario."""
-        self.cursor.execute(
-            "INSERT INTO stock (cantidad, producto, utilidad, costo, proveedor) VALUES (?, ?, ?, ?, ?)",
-            (cantidad, producto, utilidad, costo, proveedor),
-        )
-        self.conexion.commit()
-
-    def eliminar(self, id_producto):
-        """Elimina un producto por su ID."""
-        self.cursor.execute("DELETE FROM stock WHERE id = ?", (id_producto,))
-        self.conexion.commit()
-
-    def actualizar(self, id_producto, cantidad, producto, utilidad, costo, proveedor):
-        """Actualiza todos los campos de un producto dado su ID."""
-        self.cursor.execute(
-            "UPDATE stock SET cantidad=?, producto=?, utilidad=?, costo=?, proveedor=? WHERE id=?",
-            (cantidad, producto, utilidad, costo, proveedor, id_producto),
-        )
-        self.conexion.commit()
-
-    def buscar(self, texto):
-        """Busca productos cuyo nombre contenga 'texto' (búsqueda parcial)."""
-        self.cursor.execute(
-            "SELECT * FROM stock WHERE producto LIKE ?", (f"%{texto}%",)
-        )
+    def obtener_todos(self):
+        if not self.cursor:
+            self.conectar()
+        self.cursor.execute(f"SELECT * FROM {self.tabla}")
         return self.cursor.fetchall()
+    
+    
 
+class Stock(BaseDB):
+    def __init__(self):
+        super().__init__()
+        self.tabla = "stock"
 
-# ──────────────────────────────────────────────
-#  Ventas – registro de ventas del día
-# ──────────────────────────────────────────────
-class Ventas(BaseDatos):
-    """
-    Maneja la tabla 'ventas'.
-    - utilidad = precio_unitario × cantidad (se acumula si el producto ya existe).
-    La fecha y hora se generan automáticamente al insertar.
-    """
-
-    _nombre_tabla = "ventas"
-    _sql_crear_tabla = """
-        CREATE TABLE IF NOT EXISTS ventas (
-            id       INTEGER PRIMARY KEY,
-            cantidad INTEGER,
-            producto TEXT,
-            utilidad REAL DEFAULT 0,
-            costo    REAL DEFAULT 0,
-            proveedor TEXT,
-            fecha    DATE DEFAULT (date('now', 'localtime')),
-            hora     TIME DEFAULT (time('now', 'localtime'))
-        )
-    """
-
-    def agregar(self, cantidad, producto, utilidad=0.0, **kwargs):
-        """
-        Registra una venta.
-        - Si el producto ya existe, acumula cantidad y utilidad.
-        - Si no existe, crea un registro nuevo.
-        """
-        self.cursor.execute(
-            "SELECT id, cantidad, utilidad FROM ventas WHERE producto = ?",
-            (producto,),
-        )
-        registro = self.cursor.fetchone()
-
-        if registro:
-            self.cursor.execute(
-                "UPDATE ventas SET cantidad=?, utilidad=? WHERE id=?",
-                (registro[1] + cantidad, (registro[2] or 0) + utilidad, registro[0]),
+    def crear_tablas(self):
+        self.cursor.execute(f'''
+            CREATE TABLE IF NOT EXISTS {self.tabla} (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                cantidad INTEGER,
+                producto TEXT,
+                utilidad REAL,
+                costo REAL,
+                proveedor TEXT
             )
-        else:
-            self.cursor.execute(
-                "INSERT INTO ventas (cantidad, producto, utilidad, costo, proveedor) VALUES (?, ?, ?, ?, ?)",
-                (cantidad, producto, utilidad, kwargs.get('costo', 0.0), kwargs.get('proveedor', '')),
+        ''')#bien 
+        self.conexion.commit()
+
+    def actualizar(self, producto, cantidad):
+        if not self.cursor:
+            self.conectar()
+        self.cursor.execute(f"UPDATE {self.tabla} SET cantidad = cantidad - ? WHERE producto = ?", (cantidad, producto))
+        self.conexion.commit()
+    def agregar_stock(self, cantidad, producto, utilidad, costo, proveedor):
+        if not self.cursor:
+            self.conectar()
+        self.cursor.execute(f"INSERT INTO {self.tabla} (cantidad, producto, utilidad, costo, proveedor) VALUES (?, ?, ?, ?, ?)", (cantidad, producto, utilidad, costo, proveedor))
+        self.conexion.commit()
+
+    def eliminar_stock(self, producto):
+        if not self.cursor:
+            self.conectar()
+        self.cursor.execute(f"DELETE FROM {self.tabla} WHERE producto = ?", (producto,))
+        self.conexion.commit()
+
+    def modificar_stock(self, id_registro, cantidad, producto, utilidad, costo, proveedor):
+        if not self.cursor:
+            self.conectar()
+        self.cursor.execute(f'''
+            UPDATE {self.tabla} 
+            SET cantidad = ?, producto = ?, utilidad = ?, costo = ?, proveedor = ? 
+            WHERE id = ?
+        ''', (cantidad, producto, utilidad, costo, proveedor, id_registro))
+        self.conexion.commit()
+
+class VentasDiarias(BaseDB):
+    def __init__(self):
+        super().__init__()
+        self.tabla = "ventas"
+
+    def crear_tablas(self):
+        # Crear tabla ventas según lo solicitado
+        self.cursor.execute(f'''
+            CREATE TABLE IF NOT EXISTS {self.tabla} (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                cantidad INTEGER,
+                producto TEXT,
+                utilidad REAL,
+                hora TIME DEFAULT (time('now', 'localtime'))
             )
+        ''')
+        self.conexion.commit()
+    def agregar_venta(self, cantidad, producto, utilidad):
+        if not self.cursor:
+            self.conectar()
+        self.cursor.execute(f"INSERT INTO {self.tabla} (cantidad, producto, utilidad) VALUES (?, ?, ?)", (cantidad, producto, utilidad))
+        self.conexion.commit()
+
+class Ventas(BaseDB):
+    def __init__(self):
+        super().__init__()
+        self.tabla = "ventas_diarias"
+
+    def crear_tablas(self):
+        self.cursor.execute(f'''
+            CREATE TABLE IF NOT EXISTS {self.tabla} (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                cantidad INTEGER,
+                producto TEXT,
+                costo REAL,
+                utilidad REAL,
+                proveedor TEXT,
+                fecha DATE DEFAULT (date('now', 'localtime')),
+                 hora TIME DEFAULT (time('now', 'localtime'))
+            )
+        ''')
+        self.conexion.commit()
+
+    def agregar_venta(self, cantidad, producto, costo, utilidad, proveedor):
+        if not self.cursor:
+            self.conectar()
+        self.cursor.execute(f"INSERT INTO {self.tabla} (cantidad, producto, costo, utilidad, proveedor) VALUES (?, ?, ?, ?, ?)", (cantidad, producto, costo, utilidad, proveedor))
+        self.conexion.commit()
+    
+
+class proveedores(BaseDB):
+    def __init__(self):
+        super().__init__()
+        self.tabla = "proveedores"
+
+    def crear_tablas(self):
+        self.cursor.execute(f'''
+            CREATE TABLE IF NOT EXISTS {self.tabla} (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                nombre TEXT,
+                telefono TEXT,
+                correo TEXT
+            )
+        ''')
+        self.conexion.commit()
+    def agregar_proveedor(self, nombre, telefono, correo):
+        if not self.cursor:
+            self.conectar()
+        self.cursor.execute(f"INSERT INTO {self.tabla} (nombre, telefono, correo) VALUES (?, ?, ?)", (nombre, telefono, correo))
+        self.conexion.commit()
+    def eliminar_proveedor(self, nombre):
+        if not self.cursor:
+            self.conectar()
+        self.cursor.execute(f"DELETE FROM {self.tabla} WHERE nombre = ?", (nombre,))
+        self.conexion.commit()
+    def actualizar_provider(self, nombre, telefono, correo):
+        if not self.cursor:
+            self.conectar()
+        self.cursor.execute(f"UPDATE {self.tabla} SET telefono = ?, correo = ? WHERE nombre = ?", (telefono, correo, nombre))
         self.conexion.commit()
 
 
-# ──────────────────────────────────────────────
-#  Ventas Diarias – historial consolidado
-# ──────────────────────────────────────────────
-class VentasDiarias(BaseDatos):
-    """
-    Maneja la tabla 'ventas_diarias'.
-    Se usa para copiar las ventas del día actual desde la tabla 'ventas'
-    como registro histórico permanente.
-    """
-
-    _nombre_tabla = "ventas_diarias"
-    _sql_crear_tabla = """
-        CREATE TABLE IF NOT EXISTS ventas_diarias (
-            id        INTEGER PRIMARY KEY,
-            cantidad  INTEGER,
-            producto  TEXT,
-            utilidad  REAL,
-            costo     REAL,
-            proveedor TEXT,
-            fecha     TEXT,
-            hora      TEXT
-        )
-    """
-
-    def importar_ventas_hoy(self):
-        """
-        Copia todos los registros de 'ventas' cuya fecha sea hoy
-        hacia la tabla 'ventas_diarias'.
-        """
-        hoy = datetime.now().strftime("%Y-%m-%d")
-        try:
-            self.cursor.execute(
-                """
-                INSERT INTO ventas_diarias (cantidad, producto, utilidad, costo, proveedor, fecha, hora)
-                SELECT cantidad, producto, utilidad, costo, proveedor, fecha, hora
-                FROM ventas
-                WHERE fecha = ?
-                """,
-                (hoy,),
-            )
-            self.conexion.commit()
-            print(f"Ventas del {hoy} importadas correctamente a ventas_diarias.")
-        except Exception as ex:
-            print(f"Error al importar ventas: {ex}")
