@@ -1,113 +1,129 @@
 import sqlite3
+import datetime
 
 class BaseDB:
+    """Clase base de datos primaria de la cual heredan todas las tablas."""
+    
     def __init__(self, db_name="stock.db"):
         self.db_name = db_name
         self.conexion = None
         self.cursor = None
 
     def conectar(self):
+        """Abre la conexión hacia SQLite local y genera el cursor."""
         self.conexion = sqlite3.connect(self.db_name)
         self.cursor = self.conexion.cursor()
         
-
     def obtener_columnas(self):
+        """Introspecta la tabla usando el PRAGMA de SQLite para devolver los nombres de las columnas."""
         if not self.cursor:
             self.conectar()
         self.cursor.execute(f"PRAGMA table_info({self.tabla})")
         return [col[1] for col in self.cursor.fetchall()]
 
     def obtener_todos(self):
+        """Selecciona de forma universal todas las filas y columnas de la tabla indicada."""
         if not self.cursor:
             self.conectar()
         self.cursor.execute(f"SELECT * FROM {self.tabla}")
         return self.cursor.fetchall()
-    
-    
+
 
 class Stock(BaseDB):
+    """
+    Gestiona la tabla 'stock', que funje de inventario maestro.
+    Almacena artículos con sus datos monetarios, proveedor y código universal.
+    """
     def __init__(self):
         super().__init__()
         self.tabla = "stock"
 
     def crear_tablas(self):
+        """Asegura la creación de la tabla principal de inventario si no existe."""
         self.cursor.execute(f'''
             CREATE TABLE IF NOT EXISTS {self.tabla} (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id_producto TEXT,
                 cantidad INTEGER,
                 producto TEXT,
                 utilidad REAL,
                 costo REAL,
                 proveedor TEXT
             )
-        ''')#bien 
+        ''') 
         self.conexion.commit()
+
     def obtener_cantidad_menores_20(self):
+        """Retorna artículos en situación crítica de escasez (cantidad debajo de 20)."""
         if not self.cursor:
             self.conectar()
-        self.cursor.execute(f"SELECT cantidad,producto,proveedor FROM {self.tabla} WHERE cantidad < 20")
+        self.cursor.execute(f"SELECT cantidad, producto, proveedor FROM {self.tabla} WHERE cantidad < 20")
         return self.cursor.fetchall()
 
     def actualizar(self, producto, cantidad):
+        """Sustrae lógicamente una cantidad dada del stock pre-existente, basado en el nombre (case-insensitive)."""
         if not self.cursor:
             self.conectar()
-        self.cursor.execute(f"UPDATE {self.tabla} SET cantidad = cantidad - ? WHERE producto = ?", (cantidad, producto))
-        self.conexion.commit()
-    def agregar_stock(self, cantidad, producto, utilidad, costo, proveedor):
-        if not self.cursor:
-            self.conectar()
-        self.cursor.execute(f"INSERT INTO {self.tabla} (cantidad, producto, utilidad, costo, proveedor) VALUES (?, ?, ?, ?, ?)", (cantidad, producto, utilidad, costo, proveedor))
+        self.cursor.execute(f"UPDATE {self.tabla} SET cantidad = cantidad - ? WHERE LOWER(producto) = LOWER(?)", (cantidad, producto))
         self.conexion.commit()
 
-    def eliminar_stock(self, id_registro,producto):
+    def agregar_stock(self, id_producto, cantidad, producto, utilidad, costo, proveedor):
+        """Realiza una inserción para depositar un bien nuevo en caja."""
+        if not self.cursor:
+            self.conectar()
+        self.cursor.execute(f"INSERT INTO {self.tabla} (id_producto, cantidad, producto, utilidad, costo, proveedor) VALUES (?, ?, ?, ?, ?, ?)", 
+                            (id_producto, cantidad, producto, utilidad, costo, proveedor))
+        self.conexion.commit()
+
+    def eliminar_stock(self, id_registro, producto):
+        """Elimina un producto (o su rama) usando case-insensitive."""
         if not self.cursor:
             self.conectar()
         try:
-            self.cursor.execute(f"DELETE FROM {self.tabla} WHERE id = ? AND producto = ?", (id_registro,producto))
+            self.cursor.execute(f"DELETE FROM {self.tabla} WHERE LOWER(producto) = LOWER(?)", (producto,))
             self.conexion.commit()
         except sqlite3.Error as e:
             print(f"Error al eliminar el stock: {e}")
 
     def modificar_stock(self, id_registro, cantidad, producto, utilidad, costo, proveedor):
+        """Reemplaza la meta-data de una entrada del inventario maestro."""
         if not self.cursor:
             self.conectar()
         try:
             self.cursor.execute(f'''
             UPDATE {self.tabla} 
             SET cantidad = ?, producto = ?, utilidad = ?, costo = ?, proveedor = ? 
-            WHERE id = ?
+            WHERE id_producto = ?
         ''', (cantidad, producto, utilidad, costo, proveedor, id_registro))
             self.conexion.commit()
         except sqlite3.Error as e:
             print(f"Error al modificar el stock: {e}")
-    def obtener_cantidad(self,id_registro, producto):
+
+    def obtener_cantidad(self, producto):
+        """Consulta y extrae la cantidad disponible de un producto particular."""
         if not self.cursor:
             self.conectar()
         try:
-            self.cursor.execute(f"SELECT cantidad FROM {self.tabla} WHERE id = ? AND producto = ?", (id_registro, producto))
-            return self.cursor.fetchone()[0], self.cursor.fetchone()[1]
+            self.cursor.execute(f"SELECT cantidad FROM {self.tabla} WHERE LOWER(producto) = LOWER(?)", (producto,))
+            resultado = self.cursor.fetchone()
+            return resultado[0] if resultado else 0
         except sqlite3.Error as e:
             print(f"Error al obtener la cantidad: {e}")
-    def obtener_todo_historial(self,id_registro,costo,proveedor):
-        if not self.cursor:
-            self.conectar()
-        try:
-            self.cursor.execute(f"SELECT id_registro,costo,proveedor FROM {self.tabla} WHERE id = ? AND costo = ? AND proveedor = ?", (id_registro, costo, proveedor))
-            return self.cursor.fetchone()[0], self.cursor.fetchone()[1], self.cursor.fetchone()[2]
-        except sqlite3.Error as e:
-            print(f"Error al obtener la cantidad: {e}")
+            return 0
 
 
 class VentasDiarias(BaseDB):
+    """
+    Tabla temporal transaccional que representa el flujo de caja del día actual.
+    Suele llamarse a esta tabla 'ventas'.
+    """
     def __init__(self):
         super().__init__()
         self.tabla = "ventas"
 
     def crear_tablas(self):
-        # Crear tabla ventas según lo solicitado
         self.cursor.execute(f'''
             CREATE TABLE IF NOT EXISTS {self.tabla} (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id_producto TEXT,
                 cantidad INTEGER,
                 producto TEXT,
                 utilidad REAL,
@@ -115,45 +131,28 @@ class VentasDiarias(BaseDB):
             )
         ''')
         self.conexion.commit()
-    def agregar_venta_diaria(self,id_registro, cantidad, producto, utilidad):
+
+    def agregar_venta_diaria(self, id_producto, cantidad, producto, utilidad):
+        """Imputa una venta fugaz dentro de la caja temporal para contabilización corta."""
         if not self.cursor:
             self.conectar()
-        self.cursor.execute(f"INSERT INTO {self.tabla} (id_registro, cantidad, producto, utilidad) VALUES (?, ?, ?, ?)", (id_registro, cantidad, producto, utilidad))
+        self.cursor.execute(f"INSERT INTO {self.tabla} (id_producto, cantidad, producto, utilidad) VALUES (?, ?, ?, ?)", 
+                            (id_producto, cantidad, producto, utilidad))
+        self.conexion.commit()
+        
+    def limpiar_ventas(self):
+        """Trunca la tabla dejando la caja vacía limpia para un nuevo día/turno."""
+        if not self.cursor:
+            self.conectar()
+        self.cursor.execute(f"DELETE FROM {self.tabla}")
         self.conexion.commit()
 
-    def obtener_columnas_utilidad_total(self):
-        if not self.cursor:
-            self.conectar()
-        self.cursor.execute(f"SELECT utilidad FROM {self.tabla}")
-        return self.cursor.fetchall()
-    def obtener_columnas_cantidad(self):
-        if not self.cursor:
-            self.conectar()
-        self.cursor.execute(f"SELECT cantidad FROM {self.tabla}")
-        return self.cursor.fetchall()
-    def obtener_columnas_producto(self):
-        if not self.cursor:
-            self.conectar()
-        self.cursor.execute(f"SELECT producto FROM {self.tabla}")
-        return self.cursor.fetchall()
-    def obtener_columnas_id(self):
-        if not self.cursor:
-            self.conectar()
-        self.cursor.execute(f"SELECT id FROM {self.tabla}")
-        return self.cursor.fetchall()
-    def obtener_columnas_hora(self,producto):
-        if not self.cursor:
-            self.conectar()
-        self.cursor.execute(f"SELECT hora FROM {self.tabla} WHERE producto = ?", (producto,))
-
-        return self.cursor.fetchall()
-    def obtener_todo(self):
-        if not self.cursor:
-            self.conectar()
-        self.cursor.execute(f"SELECT * FROM {self.tabla}")
-        return self.cursor.fetchall()
 
 class Ventas_general(BaseDB):
+    """
+    Tabla Histórica General perpetua ('ventas_diarias') o mejor dicho Registros de operaciones.
+    Consolida absolutamente toda la actividad de ventas cruzada con costos.
+    """
     def __init__(self):
         super().__init__()
         self.tabla = "ventas_diarias"
@@ -161,9 +160,9 @@ class Ventas_general(BaseDB):
     def crear_tablas_general(self):
         self.cursor.execute(f'''
             CREATE TABLE IF NOT EXISTS {self.tabla} (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id_producto TEXT,
                 cantidad INTEGER,
-                producto TEXT UNIQUE,
+                producto TEXT,
                 costo REAL,
                 utilidad REAL,
                 proveedor TEXT,
@@ -173,14 +172,32 @@ class Ventas_general(BaseDB):
         ''')
         self.conexion.commit()
 
-    def agregar_venta_general(self, cantidad, producto, costo, utilidad, proveedor):
+    def agregar_venta_general(self, id_producto, cantidad, producto, costo, utilidad, proveedor):
+        """Plasma un registro contable sellándolo automáticamente con hora y fecha de servidor real local."""
         if not self.cursor:
             self.conectar()
-        self.cursor.execute(f"INSERT INTO {self.tabla} (cantidad, producto, costo, utilidad, proveedor) VALUES (?, ?, ?, ?, ?)", (cantidad, producto, costo, utilidad, proveedor))
+            
+        hora_actual = datetime.datetime.now().strftime("%H:%M:%S")
+        fecha_actual = datetime.date.today().strftime("%Y-%m-%d")
+        
+        self.cursor.execute(f'''
+            INSERT INTO {self.tabla} (id_producto, cantidad, producto, costo, utilidad, proveedor, hora, fecha) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (id_producto, cantidad, producto, costo, utilidad, proveedor, hora_actual, fecha_actual))
         self.conexion.commit()
-    
+        
+    def obtener_por_fecha(self, fecha):
+        """Consulta especial usando parámetros de fecha YYYY-MM-DD para obtener la bitácora requerida."""
+        if not self.cursor:
+            self.conectar()
+        self.cursor.execute(f"SELECT * FROM {self.tabla} WHERE fecha = ?", (fecha,))
+        return self.cursor.fetchall()
+
 
 class proveedores(BaseDB):
+    """
+    Administra la agenda de Entidades Suplidoras / Proveedores de la Empresa comercial.
+    """
     def __init__(self):
         super().__init__()
         self.tabla = "proveedores"
@@ -195,20 +212,21 @@ class proveedores(BaseDB):
             )
         ''')
         self.conexion.commit()
+
     def agregar_proveedor(self, nombre, telefono, correo):
         if not self.cursor:
             self.conectar()
         self.cursor.execute(f"INSERT INTO {self.tabla} (nombre, telefono, correo) VALUES (?, ?, ?)", (nombre, telefono, correo))
         self.conexion.commit()
+
     def eliminar_proveedor(self, nombre):
         if not self.cursor:
             self.conectar()
         self.cursor.execute(f"DELETE FROM {self.tabla} WHERE nombre = ?", (nombre,))
         self.conexion.commit()
+
     def actualizar_provider(self, nombre, telefono, correo):
         if not self.cursor:
             self.conectar()
         self.cursor.execute(f"UPDATE {self.tabla} SET telefono = ?, correo = ? WHERE nombre = ?", (telefono, correo, nombre))
         self.conexion.commit()
-
-

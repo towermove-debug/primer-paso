@@ -1,58 +1,133 @@
+"""
+Módulo Operaciones:
+Actúa como controlador intermediario entre la Interfaz Visual y la Base de Datos.
+Contiene la lógica de negocio y redirección.
+"""
 from base_de_datos import *
 
 class procesos:
     def __init__(self):
+        """Inicializa las conexiones a todas las tablas y asegura su existencia."""
         self.db = {
             "stock": Stock(),
             "ventas": VentasDiarias(),
-            "historial": Ventas(),
+            "historial": Ventas_general(),
             "proveedores": proveedores()
         }
+        
+        # Conectar y crear si no existen
         self.db["stock"].conectar()
+        self.db["stock"].crear_tablas()
+        
         self.db["ventas"].conectar()
+        self.db["ventas"].crear_tablas()
+        
         self.db["historial"].conectar()
+        self.db["historial"].crear_tablas_general()
+        
         self.db["proveedores"].conectar()
+        self.db["proveedores"].crear_tablas()
 
-   
+    # ==========================
+    # LÓGICA DE STOCK
+    # ==========================
+    def agregar_tabla_stock(self, id_producto, cantidad, producto, utilidad, costo, proveedor):
+        """Agrega un nuevo producto al inventario maestro."""
+        self.db["stock"].agregar_stock(id_producto, cantidad, producto, utilidad, costo, proveedor)
 
-
-
-    #paraq los gastos filtrar y separar productos y proveedores 
-    #yy ara reposicion hacer sistema de agregado de productos nuevos 
-
-    def agregar_tabla_stock(self, cantidad, producto, utilidad, costo, proveedor):
-        proveedor_selecionado=self.db["proveedores"].obtener_nombre(proveedor)
-        self.db["stock"].agregar_stock(cantidad, producto, utilidad, costo, proveedor_selecionado)
-
-    def eliminar_tabla_stock(self, id_registro,producto):
-        self.db["stock"].eliminar_stock(id_registro,producto)
+    def eliminar_tabla_stock(self, id_registro, producto):
+        """Elimina un producto específico del inventario maestro."""
+        self.db["stock"].eliminar_stock(id_registro, producto)
 
     def modificar_tabla_stock(self, id_registro, cantidad, producto, utilidad, costo, proveedor):
-        proveedor_selecionado=self.db["proveedores"].obtener_nombre(proveedor)
-        self.db["stock"].modificar_stock(id_registro, cantidad, producto, utilidad, costo, proveedor_selecionado)
+        """Modifica los atributos de un producto existente en el stock."""
+        # TODO: 1. Terminar la lógica para asegurar que el ID de registro no colisione al modificar.
+        # TODO: 2. Implementar búsqueda inteligente de Proveedor para validar que exista antes de modificar.
+        self.db["stock"].modificar_stock(id_registro, cantidad, producto, utilidad, costo, proveedor)
 
-    def agregar_ventas(self, cantidad, producto, utilidad):#vender diaria 
-        cantidad_previa = self.db["stock"].obtener_cantidad(id_registro,producto)
-        cantidad_restante = cantidad_previa - cantidad
-        self.db["stock"].actualizar(producto, cantidad_restante)
-        #multilpicar cantidad por utilidad para obtener la utilidad total
-        utilidad_total = cantidad * utilidad
-        self.db["ventas"].agregar_venta_diaria(id_registro,cantidad, producto, utilidad_total)
-
-
-    def agregar_historial(self):
-        #de stock debo obntener id,costo,proveedor
-       id_producto,costo,proveedores= self.db["stock"].obtener_todo_historial()
-       #de ventas debo obtener cantidad producto,utilidad,hora
-       cantidad,producto,utilidad,hora= self.db["ventas"].obtener_todo()
+    def actualizar_tabla_stock(self, producto, cantidad):
+        """Descuenta del stock una cantidad específica."""
+        self.db["stock"].actualizar(producto, cantidad) 
 
     def menores_20(self):
-        #para la tabla de escasos un filtro de elementos menores a 20
+        """Imprime listado de productos con cantidad crítica (<20)."""
+        # TODO: 3. Cambiar el "print" por un sistema que retorne la lista para mostrar alarmas visuales.
         registros_escasos = self.db["stock"].obtener_cantidad_menores_20()
         for i in range(len(registros_escasos)):
             print(f"Cantidad: {registros_escasos[i][0]}, Producto: {registros_escasos[i][1]}, Proveedor: {registros_escasos[i][2]}")
-        #agregarse en la tabla de escasos de visual 
 
-      
+    # ==========================
+    # LÓGICA DE VENTAS DIARIAS (CAJA CHICA TEMPORAL)
+    # ==========================
+    def agregar_ventas(self, id_producto, cantidad, producto, utilidad):
+        """Registra una venta individual (carrito) y altera el stock instantáneamente."""
+        # Descontar stock
+        self.db["stock"].actualizar(producto, cantidad)
+        
+        # Guardar en ventas diarias (para cerrar caja luego)
+        utilidad_total = cantidad * utilidad
+        self.db["ventas"].agregar_venta_diaria(id_producto, cantidad, producto, utilidad_total)
 
+    # ==========================
+    # LÓGICA DE HISTORIAL (REGISTRO ABSOLUTO)
+    # ==========================
+    def agregar_historial(self):
+        """Proceso de Cierre de Día: Mueve ventas temporales al registro permanente cruzando data con el stock."""
+        ventas_hoy = self.db["ventas"].obtener_todo()
+        if not ventas_hoy:
+            return False # Fallo / no hay ventas
+            
+        stock_data = self.db["stock"].obtener_todos()
+        # Diccionario para buscar velozmente costo y proveedor en base al nombre del producto
+        stock_dict = {row[2].lower(): (row[4], row[5]) for row in stock_data}
 
+        for v in ventas_hoy:
+            id_prod = v[0]
+            can = v[1]
+            prod = v[2]
+            utilidad = v[3]
+            
+            # Buscar el costo real y proveedor desde el stock o usar por defecto
+            costo, proveedor = stock_dict.get(prod.lower(), (0.0, "Desconocido"))
+            self.db["historial"].agregar_venta_general(id_prod, can, prod, costo, utilidad, proveedor)
+            
+        # Vaciar caja chica para arrancar limpio el proximo ciclo
+        self.db["ventas"].limpiar_ventas()
+        return True
+
+    def agregar_tabla_historial(self, id_producto, cantidad, producto, costo, utilidad, proveedor):
+        """Ingresa directamente un registro al historial de forma manual."""
+        self.db["historial"].agregar_venta_general(id_producto, cantidad, producto, costo, utilidad, proveedor)
+
+    def obtener_historial_por_fecha(self, fecha):
+        """Filtra y devuelve todos los registros históricos ocurridos en 'fecha' (YYYY-MM-DD)."""
+        return self.db["historial"].obtener_por_fecha(fecha)
+
+    # ==========================
+    # LÓGICA DE PROVEEDORES
+    # ==========================
+    def agregar_tabla_proveedores(self, nombre, telefono, correo):
+        """Añade un nuevo proveedor a la base de datos."""
+        self.db["proveedores"].agregar_proveedor(nombre, telefono, correo)
+
+    def eliminar_tabla_proveedores(self, nombre):
+        """Borra permanentemente un proveedor."""
+        self.db["proveedores"].eliminar_proveedor(nombre)
+
+    def actualizar_tabla_proveedores(self, nombre, telefono, correo):
+        """Modifica datos de contacto de un proveedor."""
+        self.db["proveedores"].actualizar_proveedor(nombre, telefono, correo)
+
+    # ==========================
+    # FUNCIONES GENERALES
+    # ==========================
+    def obtener_columnas(self, tabla):
+        """Devuelve una lista con los nombres de las columnas para 'tabla' dictaminada."""
+        return self.db[tabla].obtener_columnas()
+
+    def obtener_todos(self, tabla):
+        """Extrae el íntegro de la data cruda de un esquema especificado."""
+        return self.db[tabla].obtener_todos()
+
+    # TODO: 4. Implementar función de desglose de 'utilidad general' descontando los gastos de costo base.
+    # TODO: 5. Crear sistema de agregado automático al proveedor cuando un producto se repone.
