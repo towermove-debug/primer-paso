@@ -56,6 +56,10 @@ class procesos:
         for i in range(len(registros_escasos)):
             print(f"Cantidad: {registros_escasos[i][0]}, Producto: {registros_escasos[i][1]}, Proveedor: {registros_escasos[i][2]}")
 
+    def reponer_tabla_stock(self, id_producto, cantidad_a_agregar):
+        """Incrementa la cantidad de un producto existente sumándole la cantidad dada."""
+        self.db["stock"].reponer_stock(id_producto, cantidad_a_agregar)
+
     # ==========================
     # LÓGICA DE VENTAS DIARIAS (CAJA CHICA TEMPORAL)
     # ==========================
@@ -73,7 +77,7 @@ class procesos:
     # ==========================
     def agregar_historial(self):
         """Proceso de Cierre de Día: Mueve ventas temporales al registro permanente cruzando data con el stock."""
-        ventas_hoy = self.db["ventas"].obtener_todo()
+        ventas_hoy = self.db["ventas"].obtener_todos()
         if not ventas_hoy:
             return False # Fallo / no hay ventas
             
@@ -114,9 +118,9 @@ class procesos:
         """Borra permanentemente un proveedor."""
         self.db["proveedores"].eliminar_proveedor(nombre)
 
-    def actualizar_tabla_proveedores(self, nombre, telefono, correo):
-        """Modifica datos de contacto de un proveedor."""
-        self.db["proveedores"].actualizar_proveedor(nombre, telefono, correo)
+    def actualizar_tabla_proveedores(self, nombre_nuevo, telefono, correo, nombre_antiguo):
+        """Modifica datos de contacto y nombre de un proveedor."""
+        self.db["proveedores"].actualizar_proveedor(nombre_nuevo, telefono, correo, nombre_antiguo)
 
     # ==========================
     # FUNCIONES GENERALES

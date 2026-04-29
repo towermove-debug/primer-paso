@@ -1,6 +1,8 @@
 import sqlite3
 import datetime
 
+# Puedes editar esta base de datos. No hay conflicto de permisos.
+
 class BaseDB:
     """Clase base de datos primaria de la cual heredan todas las tablas."""
     
@@ -72,6 +74,13 @@ class Stock(BaseDB):
             self.conectar()
         self.cursor.execute(f"INSERT INTO {self.tabla} (id_producto, cantidad, producto, utilidad, costo, proveedor) VALUES (?, ?, ?, ?, ?, ?)", 
                             (id_producto, cantidad, producto, utilidad, costo, proveedor))
+        self.conexion.commit()
+
+    def reponer_stock(self, id_producto, cantidad_a_agregar):
+        """Incrementa la cantidad de un producto existente sumándole la cantidad dada."""
+        if not self.cursor:
+            self.conectar()
+        self.cursor.execute(f"UPDATE {self.tabla} SET cantidad = cantidad + ? WHERE id_producto = ?", (cantidad_a_agregar, id_producto))
         self.conexion.commit()
 
     def eliminar_stock(self, id_registro, producto):
@@ -222,11 +231,22 @@ class proveedores(BaseDB):
     def eliminar_proveedor(self, nombre):
         if not self.cursor:
             self.conectar()
-        self.cursor.execute(f"DELETE FROM {self.tabla} WHERE nombre = ?", (nombre,))
+        self.cursor.execute(f"DELETE FROM {self.tabla} WHERE LOWER(nombre) = LOWER(?)", (nombre,))
         self.conexion.commit()
 
-    def actualizar_provider(self, nombre, telefono, correo):
+    def actualizar_proveedor(self, nombre_nuevo, telefono, correo, nombre_antiguo):
         if not self.cursor:
             self.conectar()
-        self.cursor.execute(f"UPDATE {self.tabla} SET telefono = ?, correo = ? WHERE nombre = ?", (telefono, correo, nombre))
-        self.conexion.commit()
+        try:
+            # 1. Actualizar la tabla de proveedores (incluyendo el nombre si cambió)
+            self.cursor.execute(f"UPDATE {self.tabla} SET nombre = ?, telefono = ?, correo = ? WHERE LOWER(nombre) = LOWER(?)", 
+                                (nombre_nuevo, telefono, correo, nombre_antiguo))
+            
+            # 2. Si el nombre cambió, debemos actualizarlo también en la tabla de stock para mantener la integridad
+            if nombre_nuevo.lower() != nombre_antiguo.lower():
+                self.cursor.execute("UPDATE stock SET proveedor = ? WHERE LOWER(proveedor) = LOWER(?)", (nombre_nuevo, nombre_antiguo))
+            
+            self.conexion.commit()
+        except sqlite3.Error as e:
+            print(f"Error al actualizar el proveedor: {e}")
+            self.conexion.rollback()
