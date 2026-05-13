@@ -45,8 +45,9 @@ class VisualApp:
             spacing=20
         )
 
-        # Tracking de selección para modificaciones (Proveedores)
+        # Tracking de selección para modificaciones (Proveedores y Stock)
         self.selected_prov_name = None
+        self.selected_stock_id = None
 
         # Lanzar la UI estructurada superior
         self.setup_ui()
@@ -90,18 +91,26 @@ class VisualApp:
                 data = self.ops.obtener_todos(table_name)
                 cols = self.ops.obtener_columnas(table_name)
 
-            # 2. Dibujar estructura de Data Table
-            return ft.DataTable(
+            # 2. Dibujar estructura de Data Table (Modelo Escasos/Carrito)
+            if not data:
+                return ft.Container(
+                    ft.Text(f"No hay registros en {table_name}.", color=ft.Colors.GREY_400, size=16),
+                    padding=20, alignment=ft.Alignment(0, 0)
+                )
+
+            tabla = ft.DataTable(
                 columns=[ft.DataColumn(ft.Text(col.upper(), weight="bold", color=ft.Colors.BLUE_200)) for col in cols],
                 rows=[
-                    ft.DataRow(cells=[ft.DataCell(ft.Text(str(cell))) for cell in row])
+                    ft.DataRow(cells=[ft.DataCell(ft.Text(str(cell), color=ft.Colors.WHITE)) for cell in row])
                     for row in data
                 ],
                 heading_row_color=ft.Colors.BLUE_GREY_900,
                 border=ft.Border.all(1, ft.Colors.BLUE_GREY_800),
-                border_radius=10,
-                vertical_lines=ft.BorderSide(1, ft.Colors.BLUE_GREY_800),
+                border_radius=8,
             )
+
+            return ft.Row([tabla], scroll=ft.ScrollMode.AUTO)
+            
         except Exception as e:
             return ft.Text(f"Error renderizando reporte de {table_name}: {e}", color=ft.Colors.RED_400)
 
@@ -121,20 +130,28 @@ class VisualApp:
         if hasattr(self, 'prov_tel_input'): self.prov_tel_input.value = ""
         if hasattr(self, 'prov_correo_input'): self.prov_correo_input.value = ""
         self.selected_prov_name = None
+        self.selected_stock_id = None
         self.page.update()
 
 
     def toggle_form(self, title, e=None):
         """Oculta o muestra el panel de formularios superior, coloreando y titulando dinámicamente."""
-        if e is None:
-            # Click desde un botón "cerrar" u ocultamiento
+        if not title:
+            # Click desde el botón "DESCARTAR" u ocultamiento
             if self.form_container.visible:
                 self.limpiar_campos_formulario()
                 self.form_container.visible = False
+        else:
+            if self.form_container.visible and self.form_title.value == title.upper():
+                # Toggle off si hace click en el mismo botón
+                self.limpiar_campos_formulario()
+                self.form_container.visible = False
             else:
-                self.form_title.value = title if title else "DATOS DE ENTRADA"
+                # Mostrar o cambiar al nuevo formulario
+                self.form_title.value = title.upper()
                 self.form_container.visible = True
-                # Colorear títulos para intuición (Verde = Agrega, Rojo = Borra, Amarillo = Modifica)
+                
+                # Colorear títulos para intuición
                 if "Agregar" in title or "Nuevo" in title or "Nueva" in title:
                     self.form_title.color = ft.Colors.GREEN_400
                 elif "Eliminar" in title or "Borrar" in title or "Anular" in title:
@@ -143,20 +160,6 @@ class VisualApp:
                     self.form_title.color = ft.Colors.YELLOW_600
                 else:
                     self.form_title.color = ft.Colors.WHITE
-        else:  
-            # Invocación directa con objetivo (ej: "Agregar Stock")
-            self.form_title.value = title.upper()
-            self.form_container.visible = True
-            
-            # Colorear títulos para intuición (Verde = Agrega, Rojo = Borra, Amarillo = Modifica)
-            if "Agregar" in title or "Nuevo" in title or "Nueva" in title:
-                self.form_title.color = ft.Colors.GREEN_400
-            elif "Eliminar" in title or "Borrar" in title or "Anular" in title:
-                self.form_title.color = ft.Colors.RED_600
-            elif "Modificar" in title:
-                self.form_title.color = ft.Colors.YELLOW_600
-            else:
-                self.form_title.color = ft.Colors.WHITE
 
         self.page.update()
     
@@ -201,6 +204,105 @@ class VisualApp:
             
         self.page.update()
 
+    def on_id_producto_change(self, e):
+        """Busca en stock productos cuyo ID coincida parcialmente con lo que se teclea."""
+        text = e.control.value.lower()
+        self.id_similarity_list.controls.clear()
+
+        if not text:
+            self.id_similarity_container.visible = False
+            self.page.update()
+            return
+
+        try:
+            stock_data = self.ops.obtener_todos("stock")
+            db_items = [(str(row[0]), str(row[2]) if row[2] else "") for row in stock_data if row[0] is not None]
+        except Exception:
+            db_items = []
+
+        coincidencias = [item for item in db_items if text in item[0].lower()]
+
+        if coincidencias:
+            for pid, pnom in coincidencias:
+                self.id_similarity_list.controls.append(
+                    ft.ListTile(
+                        title=ft.Text(f"#{pid} - {pnom[:20]}", size=13),
+                        hover_color=ft.Colors.BLUE_GREY_700,
+                        on_click=lambda ev, selected_id=pid: self.select_id_producto(selected_id, e.control)
+                    )
+                )
+            self.id_similarity_container.visible = True
+        else:
+            self.id_similarity_list.controls.append(
+                ft.Container(ft.Text("ID no encontrado", color=ft.Colors.RED_400, italic=True), padding=10)
+            )
+            self.id_similarity_container.visible = True
+
+        self.page.update()
+
+    def on_id_producto_submit(self, e):
+        """Disparado por el escáner de código de barras (Enter) en el carrito. Busca coincidencia exacta."""
+        id_prod = e.control.value.strip()
+        if not id_prod:
+            return
+
+        try:
+            stock_data = self.ops.obtener_todos("stock")
+            encontrado = False
+            for row in stock_data:
+                if row[0] and str(row[0]).strip().lower() == id_prod.lower():
+                    encontrado = True
+                    self.select_id_producto(str(row[0]), e.control)
+                    self.page.snack_bar = ft.SnackBar(ft.Text(f"¡Producto {row[2].upper()} cargado!", color=ft.Colors.WHITE), bgcolor=ft.Colors.GREEN_700)
+                    self.page.snack_bar.open = True
+                    break
+            
+            if not encontrado:
+                self.page.snack_bar = ft.SnackBar(ft.Text(f"Excepción: El código '{id_prod}' no existe en Stock.", weight="bold", color=ft.Colors.WHITE), bgcolor=ft.Colors.RED_700)
+                self.page.snack_bar.open = True
+                e.control.value = ""
+
+        except Exception as ex:
+            print(f"Error en escáner: {ex}")
+            
+        self.page.update()
+
+    def select_id_producto(self, id_prod, text_field):
+        """Al seleccionar un ID, auto-completa todos los campos del formulario."""
+        text_field.value = id_prod
+        self.id_similarity_container.visible = False
+        self.selected_stock_id = str(id_prod)
+
+        try:
+            stock_data = self.ops.obtener_todos("stock")
+            for row in stock_data:
+                if row[0] and str(row[0]).strip().lower() == id_prod.strip().lower():
+                    if hasattr(self, 'producto_input'):
+                        self.producto_input.value = str(row[2])
+                    if hasattr(self, 'cantidad_input'):
+                        self.cantidad_input.value = "" if hasattr(self, 'form_title') and self.form_title.value == "NUEVA VENTA" else str(row[1])
+                    if hasattr(self, 'costo_input'):
+                        self.costo_input.value = str(row[4])
+                    if hasattr(self, 'utilidad_input'):
+                        self.utilidad_input.value = str(row[3])
+                    if hasattr(self, 'proveedor_input'):
+                        self.proveedor_input.value = str(row[5])
+                    break
+        except Exception as e:
+            print(f"Error autocompletando por ID {id_prod}: {e}")
+
+        self.page.update()
+
+    def abrir_formulario_reposicion(self, id_prod, nombre_prod):
+        """Abre el formulario de reposición debajo de la tabla y pre-carga los datos del producto."""
+        self.toggle_form("Registrar Reposición")
+        self.id_producto_input.value = str(id_prod)
+        self.producto_input.value = nombre_prod.title()
+        self.selected_stock_id = str(id_prod)
+        self.cantidad_input.value = ""
+        self.costo_input.value = ""
+        self.page.update()
+
     def select_producto(self, nombre, text_field):
         """Disparado al hacer clic en un producto recomendado; pre-rellena todos los cuadros de texto relativos."""
         text_field.value = nombre.title()
@@ -211,6 +313,7 @@ class VisualApp:
             for row in stock_data:
                 # row structure: id_producto=0, cantidad=1, producto=2, utilidad=3, costo=4, proveedor=5
                 if row[2] and row[2].strip().lower() == nombre.strip().lower():
+                    self.selected_stock_id = str(row[0])
                     if hasattr(self, 'id_producto_input'):
                         self.id_producto_input.value = str(row[0])
                     if hasattr(self, 'cantidad_input'):
@@ -302,9 +405,22 @@ class VisualApp:
         # -----------------------------------------------
         # 1. Definición Global de Campos (Inputs)
         # -----------------------------------------------
-        self.id_producto_input = ft.TextField(
-            label="Código (ID / Barras)", width=180, icon=ft.Icons.QR_CODE_SCANNER
+        if view_name == "ventas":
+            self.id_producto_input = ft.TextField(
+                label="Escáner Código de Barras", width=220, icon=ft.Icons.QR_CODE_SCANNER,
+                on_submit=self.on_id_producto_submit, tooltip="Escanea el código y presiona Enter"
+            )
+        else:
+            self.id_producto_input = ft.TextField(
+                label="Código (ID / Barras)", width=180, icon=ft.Icons.QR_CODE_SCANNER,
+                on_change=self.on_id_producto_change
+            )
+            
+        self.id_similarity_list = ft.ListView(spacing=0)
+        self.id_similarity_container = ft.Container(
+            content=self.id_similarity_list, visible=False, bgcolor="#334155", border_radius=5, height=120, width=260
         )
+        id_column = ft.Column([self.id_producto_input, self.id_similarity_container], spacing=5)
         
         # Contenedor especial con autocompletador para producto
         self.similarity_list = ft.ListView(spacing=0)
@@ -355,7 +471,7 @@ class VisualApp:
                 self.create_button("BORRAR", ft.Icons.DELETE, ft.Colors.RED_600, on_click=lambda _: self.toggle_form("Eliminar Stock")),
             ]
             form_fields = [
-                ft.Row([self.id_producto_input, producto_col, self.cantidad_input], vertical_alignment=ft.CrossAxisAlignment.START),
+                ft.Row([id_column, producto_col, self.cantidad_input], vertical_alignment=ft.CrossAxisAlignment.START),
                 ft.Row([self.costo_input, self.utilidad_input, proveedor_col], vertical_alignment=ft.CrossAxisAlignment.START),
             ]
 
@@ -366,7 +482,7 @@ class VisualApp:
                 self.create_button("NUEVO PEDIDO", ft.Icons.ADD_SHOPPING_CART, ft.Colors.GREEN_600, on_click=lambda _: self.toggle_form("Nueva Venta")),
             ]
             form_fields = [
-                ft.Row([self.id_producto_input, producto_col, self.cantidad_input], vertical_alignment=ft.CrossAxisAlignment.START),
+                ft.Row([id_column, producto_col, self.cantidad_input], vertical_alignment=ft.CrossAxisAlignment.START),
             ]
             
             # A) Metricas Diarias
@@ -460,8 +576,172 @@ class VisualApp:
         elif view_name == "escasos":
             title_icon = ft.Icons.WARNING
             actions = [
-                self.create_button("REPONER", ft.Icons.ADD_SHOPPING_CART, ft.Colors.GREEN_700, on_click=self.abrir_reposicion),
+                self.create_button("NUEVA REPOSICIÓN MANUAL", ft.Icons.ADD_SHOPPING_CART, ft.Colors.GREEN_600, on_click=lambda _: self.toggle_form("Registrar Reposición")),
+                self.create_button("REFRESCAR LISTA", ft.Icons.REFRESH, ft.Colors.AMBER_800, on_click=lambda _: self.update_view("escasos")),
             ]
+
+            form_fields = [
+                ft.Row([id_column, producto_col, self.cantidad_input, self.costo_input], vertical_alignment=ft.CrossAxisAlignment.START),
+            ]
+
+            try:
+                todos = self.ops.obtener_todos("stock")
+                escasos_data = [item for item in todos if item[1] < 20]
+                
+                # Obtener pedidos activos para la bandera
+                pedidos_data = self.ops.obtener_todos("pedidos")
+                productos_en_pedido = [p[1].strip().lower() for p in pedidos_data] if pedidos_data else []
+                
+                if escasos_data:
+                    escasos_rows = []
+                    for item in escasos_data:
+                        nombre_prod = item[2].strip().lower() if item[2] else ""
+                        en_pedido = nombre_prod in productos_en_pedido
+                        
+                        bandera_ui = ft.Row([
+                            ft.Icon(
+                                ft.Icons.CHECK_CIRCLE if en_pedido else ft.Icons.CANCEL,
+                                color=ft.Colors.GREEN_400 if en_pedido else ft.Colors.GREY_600,
+                                size=20
+                            ),
+                            ft.Text("Pedido Activo" if en_pedido else "Sin Pedido", 
+                                   color=ft.Colors.GREEN_200 if en_pedido else ft.Colors.GREY_500, size=12)
+                        ], alignment=ft.MainAxisAlignment.START, spacing=5)
+
+                        escasos_rows.append(
+                            ft.DataRow(cells=[
+                                ft.DataCell(ft.Text(str(item[0]))),
+                                ft.DataCell(ft.Text(str(item[1]), color=ft.Colors.RED_400, weight="bold")),
+                                ft.DataCell(ft.Text(item[2])),
+                                ft.DataCell(ft.Text(item[5] if item[5] else "Desconocido")),
+                                ft.DataCell(bandera_ui),
+                                ft.DataCell(
+                                    ft.ElevatedButton(
+                                        "REPONER", icon=ft.Icons.ADD_SHOPPING_CART,
+                                        bgcolor=ft.Colors.GREEN_700, color=ft.Colors.WHITE,
+                                        on_click=lambda ev, p_id=item[0], p_nom=item[2]: self.abrir_formulario_reposicion(p_id, p_nom)
+                                    )
+                                )
+                            ])
+                        )
+                    
+                    custom_table = ft.Column([
+                        ft.Text("PRODUCTOS EN ESCASEZ (CANTIDAD < 20)", size=18, weight="bold", color=ft.Colors.RED_300),
+                        ft.DataTable(
+                            columns=[
+                                ft.DataColumn(ft.Text("CÓDIGO")),
+                                ft.DataColumn(ft.Text("CANTIDAD")),
+                                ft.DataColumn(ft.Text("PRODUCTO")),
+                                ft.DataColumn(ft.Text("PROVEEDOR")),
+                                ft.DataColumn(ft.Text("ESTADO")),
+                                ft.DataColumn(ft.Text("ACCIÓN")),
+                            ],
+                            rows=escasos_rows,
+                            border=ft.Border.all(1, ft.Colors.BLUE_GREY_800),
+                            border_radius=8,
+                            heading_row_color=ft.Colors.BLUE_GREY_900,
+                        )
+                    ])
+                    extras_ui.append(ft.Container(content=custom_table, padding=15, bgcolor="#1e293b", border_radius=10))
+                else:
+                    extras_ui.append(
+                        ft.Container(
+                            ft.Text("No hay productos en escasez actualmente.", color=ft.Colors.GREEN_400, size=16),
+                            padding=20, alignment=ft.Alignment(0, 0)
+                        )
+                    )
+            except Exception as e:
+                extras_ui.append(ft.Text(f"Error cargando escasos: {e}", color=ft.Colors.RED_400))
+
+        # VISTA DE PEDIDOS A PROVEEDORES
+        elif view_name == "pedidos":
+            title_icon = ft.Icons.LOCAL_SHIPPING
+            actions = [
+                self.create_button("REFRESCAR", ft.Icons.REFRESH, ft.Colors.BLUE_700, on_click=lambda _: self.update_view("pedidos")),
+            ]
+
+            try:
+                pedidos = self.ops.obtener_pedidos()
+                proveedores_set = sorted(set(row[5] for row in pedidos)) if pedidos else []
+                pedidos_ui = ft.Column(spacing=15, scroll=ft.ScrollMode.AUTO)
+
+                for prov in proveedores_set:
+                    prov_pedidos = [p for p in pedidos if p[5] == prov]
+                    if not prov_pedidos:
+                        continue
+                    rows = []
+                    for p in prov_pedidos:
+                        id_pedido = p[0]
+                        producto = p[1]
+                        cantidad = p[2]
+                        precio_uni = p[3]
+                        costo_total = p[4]
+                        estado = p[6]
+                        fecha = p[7]
+
+                        is_entregado = estado == "ENTREGADO"
+                        rows.append(
+                            ft.DataRow(cells=[
+                                ft.DataCell(ft.Text(str(id_pedido))),
+                                ft.DataCell(ft.Text(producto)),
+                                ft.DataCell(ft.Text(str(cantidad))),
+                                ft.DataCell(ft.Text(f"${precio_uni:.2f}")),
+                                ft.DataCell(ft.Text(f"${costo_total:.2f}")),
+                                ft.DataCell(ft.Text(estado, color=ft.Colors.GREEN_400 if is_entregado else ft.Colors.ORANGE_400)),
+                                ft.DataCell(ft.Text(fecha)),
+                                ft.DataCell(ft.Row([
+                                    ft.ElevatedButton(
+                                        "AVANZAR", icon=ft.Icons.ARROW_FORWARD,
+                                        bgcolor=ft.Colors.BLUE_700, color=ft.Colors.WHITE,
+                                        on_click=lambda _, pid=id_pedido, est=estado: self.avanzar_estado_pedido(pid, est)
+                                    ),
+                                    ft.ElevatedButton(
+                                        "ELIMINAR", icon=ft.Icons.DELETE,
+                                        bgcolor=ft.Colors.RED_700 if is_entregado else ft.Colors.GREY_700, color=ft.Colors.WHITE,
+                                        disabled=not is_entregado,
+                                        on_click=lambda _, pid=id_pedido: self.eliminar_pedido(pid)
+                                    ),
+                                ])),
+                            ])
+                        )
+
+                    pedidos_ui.controls.append(
+                        ft.Container(
+                            content=ft.Column([
+                                ft.Text(f"PROVEEDOR: {prov.upper()}", size=18, weight="bold", color=ft.Colors.TEAL_300),
+                                ft.DataTable(
+                                    columns=[
+                                        ft.DataColumn(ft.Text("ID")),
+                                        ft.DataColumn(ft.Text("PRODUCTO")),
+                                        ft.DataColumn(ft.Text("CANT.")),
+                                        ft.DataColumn(ft.Text("P.UNIT")),
+                                        ft.DataColumn(ft.Text("TOTAL")),
+                                        ft.DataColumn(ft.Text("ESTADO")),
+                                        ft.DataColumn(ft.Text("FECHA")),
+                                        ft.DataColumn(ft.Text("ACCIONES")),
+                                    ],
+                                    rows=rows,
+                                    border=ft.Border.all(1, ft.Colors.TEAL_700),
+                                    border_radius=8,
+                                    heading_row_color=ft.Colors.TEAL_900,
+                                )
+                            ]),
+                            padding=15, bgcolor="#1e293b", border_radius=10
+                        )
+                    )
+
+                if not pedidos:
+                    pedidos_ui.controls.append(
+                        ft.Container(
+                            ft.Text("No hay pedidos registrados.", color=ft.Colors.GREY_400, size=16),
+                            padding=20, alignment=ft.Alignment(0, 0)
+                        )
+                    )
+
+                extras_ui.append(pedidos_ui)
+
+            except Exception as ex:
+                extras_ui.append(ft.Text(f"Error cargando pedidos: {ex}", color=ft.Colors.RED_400))
 
         # -----------------------------------------------
         # 3. Empaquetado Final de Contenedores de Formulario y Visores
@@ -477,6 +757,7 @@ class VisualApp:
             ], spacing=15)
 
         self.table_container.content = self.create_data_table(view_name)
+        mostrar_tabla = view_name not in ["pedidos", "escasos"]
 
         # -----------------------------------------------
         # 4. Acople Principal de Pantalla
@@ -487,13 +768,16 @@ class VisualApp:
                 ft.Icon(title_icon, color=ft.Colors.BLUE_400, size=30)
             ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
             ft.Divider(height=10, color=ft.Colors.BLUE_GREY_800),
-            *extras_ui,
             ft.Row(actions, spacing=15, wrap=True),
             self.form_container,
+            *extras_ui,
             self.cart_container,
-            ft.Text("SALIDA DE DATOS TABULARES", size=14, weight="bold", color=ft.Colors.GREY_500),
-            ft.Row([self.table_container], scroll=ft.ScrollMode.AUTO), 
         ])
+        if mostrar_tabla:
+            self.main_content.controls.extend([
+                ft.Text("SALIDA DE DATOS TABULARES", size=14, weight="bold", color=ft.Colors.GREY_500),
+                self.table_container,
+            ])
         
         self.page.update()
 
@@ -520,17 +804,19 @@ class VisualApp:
                 self.update_view("stock")
 
             elif titulo_accion == "MODIFICAR STOCK":
-                id_prod = self.id_producto_input.value
+                id_prod_nuevo = self.id_producto_input.value
                 can = int(self.cantidad_input.value) if self.cantidad_input.value else 0
                 prod = self.producto_input.value
                 util = float(self.utilidad_input.value.replace(",", ".")) if self.utilidad_input.value else 0.0
                 costo = float(self.costo_input.value.replace(",", ".")) if self.costo_input.value else 0.0
                 prov = self.proveedor_input.value
                 
-                # En esta UI, usamos el ID que está en el campo (o 0 si no se usa ID para búsqueda)
-                self.ops.modificar_tabla_stock(id_prod, can, prod, util, costo, prov)
+                # En esta UI, usamos el ID que está en el campo, o el ID seleccionado previamente
+                id_prod_antiguo = self.selected_stock_id if self.selected_stock_id else id_prod_nuevo
+                self.ops.modificar_tabla_stock(id_prod_antiguo, can, prod, util, costo, prov)
                 self.page.snack_bar = ft.SnackBar(ft.Text("Éxito: Producto actualizado en base de datos."), bgcolor=ft.Colors.ORANGE_700)
                 self.page.snack_bar.open = True
+                self.selected_stock_id = None
                 self.update_view("stock")
 
             elif titulo_accion == "ELIMINAR STOCK":
@@ -604,6 +890,30 @@ class VisualApp:
                 self.producto_input.value = ""
                 self.update_view("ventas")
 
+            # FLUJO REPOSICION DE ESCASOS
+            elif titulo_accion == "REGISTRAR REPOSICIÓN":
+                producto = self.producto_input.value.strip() if self.producto_input.value else ""
+                cantidad = int(self.cantidad_input.value) if self.cantidad_input.value else 0
+                precio_unitario = float(self.costo_input.value.replace(",", ".")) if self.costo_input.value else 0.0
+
+                if not producto or cantidad <= 0 or precio_unitario <= 0:
+                    raise ValueError("Complete producto, cantidad y costo correctamente con valores mayores a 0.")
+
+                stock_data = self.ops.obtener_todos("stock")
+                proveedor = "Desconocido"
+                for row in stock_data:
+                    if row[2] and row[2].strip().lower() == producto.lower():
+                        proveedor = row[5] if row[5] else "Desconocido"
+                        break
+
+                costo_total = cantidad * precio_unitario
+                self.ops.agregar_tabla_pedidos(producto, cantidad, precio_unitario, costo_total, proveedor, "GENERADO")
+
+                self.page.snack_bar = ft.SnackBar(ft.Text(f"Pedido de {cantidad}x {producto} registrado!"), bgcolor=ft.Colors.GREEN_700)
+                self.page.snack_bar.open = True
+                
+                self.update_view("escasos")
+
         except ValueError as ve:
             self.page.snack_bar = ft.SnackBar(ft.Text(f"Validación: {ve}"), bgcolor=ft.Colors.RED_700)
             self.page.snack_bar.open = True
@@ -665,7 +975,37 @@ class VisualApp:
         import sys
         subprocess.Popen([sys.executable, "escasos_reposicion.py"])
 
-  
+    def avanzar_estado_pedido(self, id_pedido, estado_actual):
+        """Avanza el estado del pedido: GENERADO -> PEDIDO -> ENTREGADO."""
+        estados = ["GENERADO", "PEDIDO", "ENTREGADO"]
+        try:
+            idx = estados.index(estado_actual)
+            if idx < 2:
+                nuevo_estado = estados[idx + 1]
+                self.ops.actualizar_tabla_pedidos(id_pedido, nuevo_estado)
+                self.page.snack_bar = ft.SnackBar(ft.Text(f"Pedido #{id_pedido} ahora: {nuevo_estado}"), bgcolor=ft.Colors.BLUE_700)
+            else:
+                self.page.snack_bar = ft.SnackBar(ft.Text("El pedido ya está ENTREGADO"), bgcolor=ft.Colors.ORANGE_700)
+            self.page.snack_bar.open = True
+            self.update_view("pedidos")
+        except Exception as ex:
+            self.page.snack_bar = ft.SnackBar(ft.Text(f"Error: {ex}"), bgcolor=ft.Colors.RED_900)
+            self.page.snack_bar.open = True
+            self.page.update()
+
+    def eliminar_pedido(self, id_pedido):
+        """Elimina un pedido (solo si está ENTREGADO, repone stock automáticamente)."""
+        try:
+            self.ops.eliminar_tabla_pedidos(id_pedido)
+            self.page.snack_bar = ft.SnackBar(ft.Text(f"Pedido #{id_pedido} eliminado y stock repuesto"), bgcolor=ft.Colors.GREEN_700)
+            self.page.snack_bar.open = True
+            self.update_view("pedidos")
+        except Exception as ex:
+            self.page.snack_bar = ft.SnackBar(ft.Text(f"Error: {ex}"), bgcolor=ft.Colors.RED_900)
+            self.page.snack_bar.open = True
+            self.page.update()
+
+   
 
     # ==========================================
     # CABLEADO INICIAL DEL ENTORNO APP MAESTRA
@@ -679,6 +1019,7 @@ class VisualApp:
                 self.create_button("BITÁCORA HISTÓRICA", ft.Icons.HISTORY, ft.Colors.BLUE_GREY_700, on_click=lambda _: self.update_view("registro")),
                 self.create_button("ALIANZAS CORPORATIVAS", ft.Icons.PEOPLE, on_click=lambda _: self.update_view("proveedores")),
                 self.create_button("INVENTARIO EN RIESGO", ft.Icons.WARNING, ft.Colors.AMBER_800, on_click=lambda _: self.update_view("escasos")),
+                self.create_button("PEDIDOS A PROVEEDORES", ft.Icons.LOCAL_SHIPPING, ft.Colors.TEAL_700, on_click=lambda _: self.update_view("pedidos")),
             ],
             alignment=ft.MainAxisAlignment.CENTER,
             spacing=15,
@@ -688,8 +1029,8 @@ class VisualApp:
         header = ft.Container(
             content=ft.Column([
                 ft.Row([
-                    ft.Icon(ft.Icons.DASHBOARD, color=ft.Colors.BLUE_400, size=42),
-                    ft.Text("ERP MANAGEMENT SYS", size=32, weight="w900", color=ft.Colors.BLUE_400),
+                    ft.Icon(ft.Icons.BUSINESS_CENTER, color=ft.Colors.BLUE_400, size=42),
+                    ft.Text("GESTIÓN DE NEGOCIO", size=32, weight="w900", color=ft.Colors.BLUE_400),
                 ], alignment=ft.MainAxisAlignment.CENTER),
                 ft.Divider(height=20, color=ft.Colors.TRANSPARENT),
                 menu_row,
