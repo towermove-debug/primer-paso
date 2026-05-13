@@ -444,7 +444,7 @@ class VisualApp:
         proveedor_col = ft.Column([self.proveedor_input, self.prov_similarity_container], expand=True, spacing=5)
         
         # Campos específicos para proveedores con autocompletado
-        self.prov_nombre_input = ft.TextField(label="Nombre Oficial del Proveedor", on_change=self.on_proveedor_change)
+        self.prov_nombre_input = ft.TextField(label="Nombre Oficial del Proveedor", expand=True, on_change=self.on_proveedor_change)
         self.prov_tel_input = ft.TextField(label="Teléfono", expand=True)
         self.prov_correo_input = ft.TextField(label="Correo Electrónico", expand=True)
         
@@ -512,8 +512,8 @@ class VisualApp:
                         ft.DataCell(ft.Text(item['id_producto'])),
                         ft.DataCell(ft.Text(str(item['cantidad']))),
                         ft.DataCell(ft.Text(item['producto'])),
-                        ft.DataCell(ft.Text(f"${item['precio']:.2f}")),
-                        ft.DataCell(ft.Text(f"${item['subtotal']:.2f}")),
+                        ft.DataCell(ft.Text(f"${item['precio']:,.2f}")),
+                        ft.DataCell(ft.Text(f"${item['subtotal']:,.2f}")),
                         ft.DataCell(ft.IconButton(ft.Icons.DELETE, icon_color=ft.Colors.RED_400, on_click=lambda ev, cur_idx=idx: self.eliminar_del_carrito(cur_idx)))
                     ]) for idx, item in enumerate(self.carrito_items)
                 ]
@@ -529,7 +529,7 @@ class VisualApp:
                         rows=cart_rows, border=ft.Border.all(1, ft.Colors.BLUE_GREY_800), border_radius=5
                     ),
                     ft.Row([
-                        ft.Text(f"TOTAL A PAGAR: ${total_pedido:.2f}", size=22, weight="bold", color=ft.Colors.YELLOW_400),
+                        ft.Text(f"TOTAL A PAGAR: ${total_pedido:,.2f}", size=22, weight="bold", color=ft.Colors.YELLOW_400),
                         self.create_button("FINALIZAR PAGO Y ENTREGAR", ft.Icons.PAYMENTS, ft.Colors.GREEN_800, on_click=self.finalizar_venta)
                     ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN)
                 ])
@@ -551,8 +551,35 @@ class VisualApp:
                 self.fecha_input,
                 self.create_button("FILTRAR POR DÍA", ft.Icons.FILTER_LIST, ft.Colors.BLUE_700, on_click=self.filtrar_historial),
                 self.create_button("VACIAR FILTRO Y VER TODOS", ft.Icons.LIST, ft.Colors.GREY_600, on_click=lambda _: self.limpiar_filtro_historial()),
-                
             ]
+            
+            # Mostrar métricas financieras SÓLO si se buscó una fecha
+            if hasattr(self, 'filtro_historial_fecha') and self.filtro_historial_fecha:
+                registros = self.ops.obtener_historial_por_fecha(self.filtro_historial_fecha)
+                total_ingresos = sum(float(r[4]) for r in registros if r[4])
+                total_costos = sum((float(r[1]) * float(r[3])) for r in registros if r[1] and r[3])
+                ganancia_neta = total_ingresos - total_costos
+                
+                resumen_ui = ft.Container(
+                    content=ft.Row([
+                        ft.Column([
+                            ft.Text("VENTAS BRUTAS", size=13, color=ft.Colors.GREY_400, weight="bold"),
+                            ft.Text(f"${total_ingresos:,.2f}", size=22, color=ft.Colors.BLUE_400, weight="bold"),
+                        ], alignment=ft.MainAxisAlignment.CENTER, horizontal_alignment=ft.CrossAxisAlignment.CENTER),
+                        ft.Container(width=1, height=40, bgcolor=ft.Colors.BLUE_GREY_700),
+                        ft.Column([
+                            ft.Text("COSTOS DE MERCADERÍA", size=13, color=ft.Colors.GREY_400, weight="bold"),
+                            ft.Text(f"${total_costos:,.2f}", size=22, color=ft.Colors.RED_400, weight="bold"),
+                        ], alignment=ft.MainAxisAlignment.CENTER, horizontal_alignment=ft.CrossAxisAlignment.CENTER),
+                        ft.Container(width=1, height=40, bgcolor=ft.Colors.BLUE_GREY_700),
+                        ft.Column([
+                            ft.Text("GANANCIA NETA (PROFIT)", size=13, color=ft.Colors.GREY_400, weight="bold"),
+                            ft.Text(f"${ganancia_neta:,.2f}", size=22, color=ft.Colors.GREEN_400, weight="bold"),
+                        ], alignment=ft.MainAxisAlignment.CENTER, horizontal_alignment=ft.CrossAxisAlignment.CENTER),
+                    ], alignment=ft.MainAxisAlignment.SPACE_EVENLY),
+                    bgcolor="#1e293b", padding=15, border_radius=10, border=ft.Border.all(1, ft.Colors.BLUE_GREY_800), margin=ft.Margin(0, 10, 0, 10)
+                )
+                extras_ui.append(resumen_ui)
             view_name = "historial"
 
         # VISTA DE PROVEEDORES Y CONTACTOS
@@ -579,6 +606,17 @@ class VisualApp:
                 self.create_button("NUEVA REPOSICIÓN MANUAL", ft.Icons.ADD_SHOPPING_CART, ft.Colors.GREEN_600, on_click=lambda _: self.toggle_form("Registrar Reposición")),
                 self.create_button("REFRESCAR LISTA", ft.Icons.REFRESH, ft.Colors.AMBER_800, on_click=lambda _: self.update_view("escasos")),
             ]
+
+            self.cantidad_input.label = "Cantidad a Sumar"
+            self.cantidad_input.width = 180
+            self.costo_input.label = "Nuevo Costo Unit."
+            self.costo_input.width = 180
+            
+            # Acortar el input de producto SOLO en Escasos
+            self.producto_input.expand = False
+            self.producto_input.width = 300
+            producto_col.expand = False
+            producto_col.width = 300
 
             form_fields = [
                 ft.Row([id_column, producto_col, self.cantidad_input, self.costo_input], vertical_alignment=ft.CrossAxisAlignment.START),
@@ -616,9 +654,9 @@ class VisualApp:
                                 ft.DataCell(ft.Text(item[5] if item[5] else "Desconocido")),
                                 ft.DataCell(bandera_ui),
                                 ft.DataCell(
-                                    ft.ElevatedButton(
+                                    ft.FilledButton(
                                         "REPONER", icon=ft.Icons.ADD_SHOPPING_CART,
-                                        bgcolor=ft.Colors.GREEN_700, color=ft.Colors.WHITE,
+                                        style=ft.ButtonStyle(color=ft.Colors.WHITE, bgcolor=ft.Colors.GREEN_700),
                                         on_click=lambda ev, p_id=item[0], p_nom=item[2]: self.abrir_formulario_reposicion(p_id, p_nom)
                                     )
                                 )
@@ -631,8 +669,8 @@ class VisualApp:
                             columns=[
                                 ft.DataColumn(ft.Text("CÓDIGO")),
                                 ft.DataColumn(ft.Text("CANTIDAD")),
-                                ft.DataColumn(ft.Text("PRODUCTO")),
-                                ft.DataColumn(ft.Text("PROVEEDOR")),
+                                ft.DataColumn(ft.Text("PROD.")),
+                                ft.DataColumn(ft.Text("PROV.")),
                                 ft.DataColumn(ft.Text("ESTADO")),
                                 ft.DataColumn(ft.Text("ACCIÓN")),
                             ],
@@ -665,6 +703,9 @@ class VisualApp:
                 proveedores_set = sorted(set(row[5] for row in pedidos)) if pedidos else []
                 pedidos_ui = ft.Column(spacing=15, scroll=ft.ScrollMode.AUTO)
 
+                if not hasattr(self, 'utilidad_pedidos_inputs'):
+                    self.utilidad_pedidos_inputs = {}
+
                 for prov in proveedores_set:
                     prov_pedidos = [p for p in pedidos if p[5] == prov]
                     if not prov_pedidos:
@@ -680,39 +721,55 @@ class VisualApp:
                         fecha = p[7]
 
                         is_entregado = estado == "ENTREGADO"
+                        
+                        tf_utilidad = ft.TextField(
+                            label="Nueva Utilidad", width=140, height=45, 
+                            visible=is_entregado, 
+                            tooltip="Define el nuevo precio de venta al público"
+                        )
+                        self.utilidad_pedidos_inputs[id_pedido] = tf_utilidad
+                        
                         rows.append(
                             ft.DataRow(cells=[
                                 ft.DataCell(ft.Text(str(id_pedido))),
                                 ft.DataCell(ft.Text(producto)),
                                 ft.DataCell(ft.Text(str(cantidad))),
-                                ft.DataCell(ft.Text(f"${precio_uni:.2f}")),
-                                ft.DataCell(ft.Text(f"${costo_total:.2f}")),
-                                ft.DataCell(ft.Text(estado, color=ft.Colors.GREEN_400 if is_entregado else ft.Colors.ORANGE_400)),
+                                ft.DataCell(ft.Text(f"${precio_uni:,.2f}")),
+                                ft.DataCell(ft.Text(f"${costo_total:,.2f}")),
+                                ft.DataCell(ft.Text(estado, color=ft.Colors.GREEN_400 if estado == "ENTREGADO" else ft.Colors.CYAN_400 if estado == "GENERADO" else ft.Colors.ORANGE_400)),
                                 ft.DataCell(ft.Text(fecha)),
                                 ft.DataCell(ft.Row([
-                                    ft.ElevatedButton(
+                                    ft.FilledButton(
                                         "AVANZAR", icon=ft.Icons.ARROW_FORWARD,
-                                        bgcolor=ft.Colors.BLUE_700, color=ft.Colors.WHITE,
+                                        style=ft.ButtonStyle(color=ft.Colors.WHITE, bgcolor=ft.Colors.BLUE_700),
                                         on_click=lambda _, pid=id_pedido, est=estado: self.avanzar_estado_pedido(pid, est)
                                     ),
-                                    ft.ElevatedButton(
-                                        "ELIMINAR", icon=ft.Icons.DELETE,
-                                        bgcolor=ft.Colors.RED_700 if is_entregado else ft.Colors.GREY_700, color=ft.Colors.WHITE,
+                                    tf_utilidad,
+                                    ft.FilledButton(
+                                        "RECIBIR Y CERRAR", icon=ft.Icons.CHECK,
+                                        style=ft.ButtonStyle(color=ft.Colors.WHITE, bgcolor=ft.Colors.GREEN_700 if is_entregado else ft.Colors.GREY_700),
                                         disabled=not is_entregado,
                                         on_click=lambda _, pid=id_pedido: self.eliminar_pedido(pid)
+                                    ),
+                                    ft.IconButton(
+                                        ft.Icons.DELETE_FOREVER,
+                                        icon_color=ft.Colors.RED_500,
+                                        tooltip="Cancelar y Eliminar Pedido",
+                                        on_click=lambda _, pid=id_pedido: self.cancelar_pedido(pid)
                                     ),
                                 ])),
                             ])
                         )
 
+                    total_prov = sum(p[4] for p in prov_pedidos)
                     pedidos_ui.controls.append(
                         ft.Container(
                             content=ft.Column([
-                                ft.Text(f"PROVEEDOR: {prov.upper()}", size=18, weight="bold", color=ft.Colors.TEAL_300),
+                                ft.Text(f"PROVEEDOR: {prov.upper()} | COSTO TOTAL: ${total_prov:,.2f}", size=18, weight="bold", color=ft.Colors.TEAL_300),
                                 ft.DataTable(
                                     columns=[
                                         ft.DataColumn(ft.Text("ID")),
-                                        ft.DataColumn(ft.Text("PRODUCTO")),
+                                        ft.DataColumn(ft.Text("PROD.")),
                                         ft.DataColumn(ft.Text("CANT.")),
                                         ft.DataColumn(ft.Text("P.UNIT")),
                                         ft.DataColumn(ft.Text("TOTAL")),
@@ -994,14 +1051,31 @@ class VisualApp:
             self.page.update()
 
     def eliminar_pedido(self, id_pedido):
-        """Elimina un pedido (solo si está ENTREGADO, repone stock automáticamente)."""
+        """Elimina un pedido (cierra). Si está ENTREGADO, repone stock y opcionalmente actualiza la utilidad."""
         try:
-            self.ops.eliminar_tabla_pedidos(id_pedido)
-            self.page.snack_bar = ft.SnackBar(ft.Text(f"Pedido #{id_pedido} eliminado y stock repuesto"), bgcolor=ft.Colors.GREEN_700)
+            tf = self.utilidad_pedidos_inputs.get(id_pedido) if hasattr(self, 'utilidad_pedidos_inputs') else None
+            nueva_utilidad = None
+            if tf and tf.value:
+                nueva_utilidad = float(tf.value.replace(",", "."))
+                
+            self.ops.eliminar_tabla_pedidos(id_pedido, nueva_utilidad)
+            self.page.snack_bar = ft.SnackBar(ft.Text(f"Pedido #{id_pedido} recibido. Stock y precio (opcional) actualizados."), bgcolor=ft.Colors.GREEN_700)
             self.page.snack_bar.open = True
             self.update_view("pedidos")
         except Exception as ex:
-            self.page.snack_bar = ft.SnackBar(ft.Text(f"Error: {ex}"), bgcolor=ft.Colors.RED_900)
+            self.page.snack_bar = ft.SnackBar(ft.Text(f"Error procesando pedido: {ex}"), bgcolor=ft.Colors.RED_900)
+            self.page.snack_bar.open = True
+            self.page.update()
+
+    def cancelar_pedido(self, id_pedido):
+        """Cancela un pedido y lo elimina de la base de datos sin afectar el stock."""
+        try:
+            self.ops.cancelar_tabla_pedidos(id_pedido)
+            self.page.snack_bar = ft.SnackBar(ft.Text(f"Pedido #{id_pedido} cancelado y eliminado con éxito."), bgcolor=ft.Colors.ORANGE_700)
+            self.page.snack_bar.open = True
+            self.update_view("pedidos")
+        except Exception as ex:
+            self.page.snack_bar = ft.SnackBar(ft.Text(f"Error cancelando pedido: {ex}"), bgcolor=ft.Colors.RED_900)
             self.page.snack_bar.open = True
             self.page.update()
 

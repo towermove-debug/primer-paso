@@ -146,12 +146,12 @@ class procesos:
         """Añade un nuevo pedido a la base de datos."""
         self.db["pedidos"].agregar_pedido(producto, cantidad, precio_unitario, costo_total, proveedor, estado)
 
-    def eliminar_tabla_pedidos(self, id):
+    def eliminar_tabla_pedidos(self, id, nueva_utilidad=None):
         """Borra permanentemente un pedido. Repone el stock con la cantidad y precio del pedido."""
         pedido = self.db["pedidos"].obtener_pedido(id)
         nombre_producto = pedido[1]
         cantidad = pedido[2]
-        precio_unitario = pedido[3]
+        precio_unitario = pedido[3] # Costo de reposición
         stock_data = self.db["stock"].obtener_todos()
         id_producto = None
         for row in stock_data:
@@ -159,7 +159,11 @@ class procesos:
                 id_producto = row[0]
                 break
         if id_producto:
-            self.db["stock"].reponer_stock(id_producto, cantidad, precio_unitario)
+            self.db["stock"].reponer_stock(id_producto, cantidad, precio_unitario, nueva_utilidad)
+        self.db["pedidos"].eliminar_pedido(id)
+
+    def cancelar_tabla_pedidos(self, id):
+        """Cancela y borra permanentemente un pedido SIN reponer el stock."""
         self.db["pedidos"].eliminar_pedido(id)
 
     def actualizar_tabla_pedidos(self, id, estado):

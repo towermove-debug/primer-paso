@@ -77,11 +77,14 @@ class Stock(BaseDB):
                             (id_producto, cantidad, producto, utilidad, costo, proveedor))
         self.conexion.commit()
 
-    def reponer_stock(self, id_producto, cantidad_a_agregar,costo_unitario):
-        """Incrementa la cantidad de un producto existente sumándole la cantidad dada. y actualizando el precio unitario"""
+    def reponer_stock(self, id_producto, cantidad_a_agregar, costo_unitario, nueva_utilidad=None):
+        """Incrementa la cantidad de un producto sumándole la cantidad dada, actualizando el costo y opcionalmente la utilidad."""
         if not self.cursor:
             self.conectar()
-        self.cursor.execute(f"UPDATE {self.tabla} SET cantidad = cantidad + ?, costo = ? WHERE id_producto = ?", (cantidad_a_agregar, costo_unitario, id_producto))
+        if nueva_utilidad is not None:
+            self.cursor.execute(f"UPDATE {self.tabla} SET cantidad = cantidad + ?, costo = ?, utilidad = ? WHERE id_producto = ?", (cantidad_a_agregar, costo_unitario, nueva_utilidad, id_producto))
+        else:
+            self.cursor.execute(f"UPDATE {self.tabla} SET cantidad = cantidad + ?, costo = ? WHERE id_producto = ?", (cantidad_a_agregar, costo_unitario, id_producto))
         self.conexion.commit()
 
     def eliminar_stock(self, id_registro, producto):
